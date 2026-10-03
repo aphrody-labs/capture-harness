@@ -1,4 +1,5 @@
 """Regression tests for the opt-in GUI control client."""
+
 import importlib.util
 import copy
 import json
@@ -20,13 +21,18 @@ class ReplyAddressTests(unittest.TestCase):
             root = Path(directory)
             token = "a" * 64
             (root / "control.json").write_text(json.dumps({"port": 12345, "token": token}))
-            with patch.object(CONTROL.sys, "platform", "win32"), patch.object(CONTROL.socket, "socket") as factory:
+            with (
+                patch.object(CONTROL.sys, "platform", "win32"),
+                patch.object(CONTROL.socket, "socket") as factory,
+            ):
                 client = factory.return_value.__enter__.return_value
                 client.recv.return_value = b'{"ok":true,"result":{"received":true}}'
                 payload = {"command": "status"}
                 self.assertEqual(CONTROL.request(root, payload), {"received": True})
                 client.connect.assert_called_once_with(("127.0.0.1", 12345))
-                self.assertEqual(json.loads(client.send.call_args.args[0]), {**payload, "token": token})
+                self.assertEqual(
+                    json.loads(client.send.call_args.args[0]), {**payload, "token": token}
+                )
                 self.assertNotIn("token", payload)
 
     def test_darwin_reply_address_includes_terminator(self):
@@ -38,7 +44,10 @@ class ReplyAddressTests(unittest.TestCase):
     def check_address(self, platform, terminated):
         with tempfile.TemporaryDirectory() as directory:
             with patch.object(CONTROL.sys, "platform", platform):
-                with patch.object(CONTROL.socket, "AF_UNIX", 1, create=True), patch.object(CONTROL.socket, "socket") as factory:
+                with (
+                    patch.object(CONTROL.socket, "AF_UNIX", 1, create=True),
+                    patch.object(CONTROL.socket, "socket") as factory,
+                ):
                     client = factory.return_value.__enter__.return_value
                     client.recv.return_value = b'{"ok":true,"result":{"received":true}}'
                     result = CONTROL.request(Path(directory), {"command": "status"})
@@ -54,15 +63,27 @@ class ReplyAddressTests(unittest.TestCase):
 
 class RecordingTests(unittest.TestCase):
     def recording(self):
-        return {"version": 1, "kind": "ruzu-gui-buttons", "complete": True,
-                "program_id": 42, "duration_us": 100000,
-                "events": [{"at_us": 0, "buttons": []},
-                           {"at_us": 1000, "buttons": ["L", "R"]},
-                           {"at_us": 2000, "buttons": []}]}
+        return {
+            "version": 1,
+            "kind": "ruzu-gui-buttons",
+            "complete": True,
+            "program_id": 42,
+            "duration_us": 100000,
+            "events": [
+                {"at_us": 0, "buttons": []},
+                {"at_us": 1000, "buttons": ["L", "R"]},
+                {"at_us": 2000, "buttons": []},
+            ],
+        }
 
     def status(self):
-        return {"has_session": True, "program_id": 42, "generation": 1,
-                "pid": 123, "buttons": [False]*22}
+        return {
+            "has_session": True,
+            "program_id": 42,
+            "generation": 1,
+            "pid": 123,
+            "buttons": [False] * 22,
+        }
 
     def test_native_button_order(self):
         status = self.status()
@@ -78,13 +99,21 @@ class RecordingTests(unittest.TestCase):
         for invalid in [None, [], dict(valid, events=[None])]:
             with self.assertRaises(ValueError):
                 CONTROL.validate_recording(invalid)
-        for changes in [{"complete": False}, {"version": 2}, {"duration_us": -1},
-                        {"events": []}, {"program_id": 0}]:
+        for changes in [
+            {"complete": False},
+            {"version": 2},
+            {"duration_us": -1},
+            {"events": []},
+            {"program_id": 0},
+        ]:
             with self.assertRaises(ValueError):
                 CONTROL.validate_recording(dict(valid, **changes))
-        for event in [{"at_us": 0, "buttons": []}, {"at_us": -1, "buttons": []},
-                      {"at_us": 500, "buttons": ["A", "A"]},
-                      {"at_us": 500, "buttons": ["HOME"]}]:
+        for event in [
+            {"at_us": 0, "buttons": []},
+            {"at_us": -1, "buttons": []},
+            {"at_us": 500, "buttons": ["A", "A"]},
+            {"at_us": 500, "buttons": ["HOME"]},
+        ]:
             invalid = copy.deepcopy(valid)
             invalid["events"][1] = event
             with self.assertRaises(ValueError):
@@ -95,11 +124,13 @@ class RecordingTests(unittest.TestCase):
             source = Path(directory) / "buttons.json"
             source.write_text(json.dumps(self.recording()))
             sent = []
+
             def send(_, payload):
                 sent.append(payload)
                 if payload["command"] == "set_buttons":
                     raise RuntimeError("injection failed")
                 return self.status()
+
             with patch.object(CONTROL, "request", side_effect=send):
                 with self.assertRaisesRegex(RuntimeError, "injection failed"):
                     CONTROL.replay(Path(directory), source)
@@ -108,8 +139,10 @@ class RecordingTests(unittest.TestCase):
     def test_record_interrupt_saves_and_does_not_overwrite(self):
         with tempfile.TemporaryDirectory() as directory:
             destination = Path(directory) / "buttons.json"
-            with patch.object(CONTROL, "request", return_value=self.status()), \
-                 patch.object(CONTROL.time, "sleep", side_effect=KeyboardInterrupt):
+            with (
+                patch.object(CONTROL, "request", return_value=self.status()),
+                patch.object(CONTROL.time, "sleep", side_effect=KeyboardInterrupt),
+            ):
                 CONTROL.record(Path(directory), destination, 1)
                 data = destination.read_bytes()
                 self.assertTrue(json.loads(data)["complete"])
@@ -131,9 +164,11 @@ class RecordingTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             output, stop = root / "buttons.json", root / "stop"
-            with patch.object(CONTROL, "request", return_value=self.status()), \
-                 patch.object(CONTROL.time, "monotonic", side_effect=[0, .02, .04, .06, .08]), \
-                 patch.object(CONTROL.time, "sleep", side_effect=lambda _: stop.touch()):
+            with (
+                patch.object(CONTROL, "request", return_value=self.status()),
+                patch.object(CONTROL.time, "monotonic", side_effect=[0, 0.02, 0.04, 0.06, 0.08]),
+                patch.object(CONTROL.time, "sleep", side_effect=lambda _: stop.touch()),
+            ):
                 CONTROL.record(root, output, 1, stop)
             data = json.loads(output.read_text())
             self.assertTrue(data["complete"])
@@ -148,8 +183,10 @@ class RecordingTests(unittest.TestCase):
             output, stop = root / "buttons.json", root / "stop"
             pressed = self.status()
             pressed["buttons"][0] = True
-            with patch.object(CONTROL, "request", side_effect=[self.status(), pressed]), \
-                 patch.object(CONTROL.time, "sleep", side_effect=lambda _: stop.touch()):
+            with (
+                patch.object(CONTROL, "request", side_effect=[self.status(), pressed]),
+                patch.object(CONTROL.time, "sleep", side_effect=lambda _: stop.touch()),
+            ):
                 with self.assertRaisesRegex(RuntimeError, "held buttons"):
                     CONTROL.record(root, output, 1, stop)
             self.assertFalse(json.loads(output.read_text())["complete"])
@@ -158,8 +195,10 @@ class RecordingTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory) / "buttons.json"
             statuses = [self.status(), dict(self.status(), generation=2)]
-            with patch.object(CONTROL, "request", side_effect=statuses), \
-                 patch.object(CONTROL.time, "sleep"):
+            with (
+                patch.object(CONTROL, "request", side_effect=statuses),
+                patch.object(CONTROL.time, "sleep"),
+            ):
                 with self.assertRaisesRegex(RuntimeError, "session changed"):
                     CONTROL.record(Path(directory), output, 1)
             self.assertFalse(json.loads(output.read_text())["complete"])

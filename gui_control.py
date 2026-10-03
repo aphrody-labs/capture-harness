@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Control an explicitly enabled Ruzu GUI input session, never the host keyboard."""
+
 import argparse
 import json
 import os
@@ -10,8 +11,26 @@ import time
 from pathlib import Path
 
 # Common::SettingsInput::NativeButton order, not keyboard codes.
-BUTTONS = ["A", "B", "X", "Y", "LSTICK", "RSTICK", "L", "R", "ZL", "ZR",
-           "PLUS", "MINUS", "LEFT", "UP", "RIGHT", "DOWN", "SL", "SR"]
+BUTTONS = [
+    "A",
+    "B",
+    "X",
+    "Y",
+    "LSTICK",
+    "RSTICK",
+    "L",
+    "R",
+    "ZL",
+    "ZR",
+    "PLUS",
+    "MINUS",
+    "LEFT",
+    "UP",
+    "RIGHT",
+    "DOWN",
+    "SL",
+    "SR",
+]
 
 
 def snapshot(status):
@@ -34,15 +53,23 @@ def record(directory, output, duration, stop_file=None):
     if snapshot(initial):
         raise ValueError("Release all buttons before recording")
     identity = (initial["pid"], initial["generation"], initial["program_id"])
-    data = {"version": 1, "kind": "ruzu-gui-buttons", "complete": False,
-            "program_id": initial["program_id"], "interval_ms": 20,
-            "events": [{"at_us": 0, "buttons": []}]}
+    data = {
+        "version": 1,
+        "kind": "ruzu-gui-buttons",
+        "complete": False,
+        "program_id": initial["program_id"],
+        "interval_ms": 20,
+        "events": [{"at_us": 0, "buttons": []}],
+    }
     # Never overwrite an existing recording, even on a failed attempt.
     with os.fdopen(os.open(output, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), "w") as file:
         start = previous = time.monotonic()
         current = []
-        print("Recording guest buttons. Navigate now; release buttons before Ctrl-C to finish.",
-              file=sys.stderr, flush=True)
+        print(
+            "Recording guest buttons. Navigate now; release buttons before Ctrl-C to finish.",
+            file=sys.stderr,
+            flush=True,
+        )
         try:
             try:
                 while time.monotonic() - start < duration:
@@ -52,29 +79,37 @@ def record(directory, output, duration, stop_file=None):
                     status = request(directory, {"command": "status"})
                     now = time.monotonic()
                     if now - previous > 0.25:
-                        raise RuntimeError("recording gap exceeded 250 ms; retry from the same menu")
+                        raise RuntimeError(
+                            "recording gap exceeded 250 ms; retry from the same menu"
+                        )
                     previous = now
                     if (status["pid"], status["generation"], status["program_id"]) != identity:
                         raise RuntimeError("emulation session changed during recording")
                     buttons = snapshot(status)
                     if buttons != current:
                         current = buttons
-                        data["events"].append({"at_us": round((now-start)*1e6), "buttons": buttons})
+                        data["events"].append(
+                            {"at_us": round((now - start) * 1e6), "buttons": buttons}
+                        )
             except KeyboardInterrupt:
                 pass
             if current:
                 raise RuntimeError("recording ended with held buttons; recording is incomplete")
             data["complete"] = True
         finally:
-            data["duration_us"] = round((time.monotonic()-start)*1e6)
+            data["duration_us"] = round((time.monotonic() - start) * 1e6)
             json.dump(data, file, indent=2)
             file.write("\n")
     return {"saved": str(output), "events": len(data["events"])}
 
 
 def validate_recording(data):
-    if (not isinstance(data, dict) or data.get("version") != 1 or data.get("kind") != "ruzu-gui-buttons"
-            or data.get("complete") is not True):
+    if (
+        not isinstance(data, dict)
+        or data.get("version") != 1
+        or data.get("kind") != "ruzu-gui-buttons"
+        or data.get("complete") is not True
+    ):
         raise ValueError("unsupported or incomplete recording")
     duration = data.get("duration_us")
     if type(duration) is not int or not 0 < duration <= 3_601_000_000:
@@ -92,9 +127,12 @@ def validate_recording(data):
         buttons = event.get("buttons")
         if type(at) is not int or not previous < at <= duration:
             raise ValueError("event times must be strictly increasing within duration")
-        if (not isinstance(buttons, list) or len(buttons) > len(BUTTONS)
-                or any(not isinstance(name, str) or name not in BUTTONS for name in buttons)
-                or len(set(buttons)) != len(buttons)):
+        if (
+            not isinstance(buttons, list)
+            or len(buttons) > len(BUTTONS)
+            or any(not isinstance(name, str) or name not in BUTTONS for name in buttons)
+            or len(set(buttons)) != len(buttons)
+        ):
             raise ValueError("invalid buttons")
         previous = at
     if events[0] != {"at_us": 0, "buttons": []} or events[-1]["buttons"]:
@@ -127,12 +165,17 @@ def replay(directory, source):
             # Heartbeat refreshes the GUI watchdog for long holds, without new edges.
             request(directory, {"command": "set_buttons", "buttons": current, "hold_ms": 1000})
             if index < len(events):
-                time.sleep(max(0, min(0.25, start + events[index]["at_us"]/1e6 - time.monotonic())))
+                time.sleep(
+                    max(0, min(0.25, start + events[index]["at_us"] / 1e6 - time.monotonic()))
+                )
     finally:
         try:
             request(directory, {"command": "release"})
         except Exception as error:
-            print(f"Release request failed; GUI watchdog will release held buttons: {error}", file=sys.stderr)
+            print(
+                f"Release request failed; GUI watchdog will release held buttons: {error}",
+                file=sys.stderr,
+            )
     return {"replayed": str(source), "events": len(events)}
 
 
@@ -141,7 +184,12 @@ def request(directory, payload):
         endpoint = json.loads((directory / "control.json").read_text())
         port = endpoint["port"]
         token = endpoint["token"]
-        if type(port) is not int or not 1 <= port <= 65535 or not isinstance(token, str) or len(token) != 64:
+        if (
+            type(port) is not int
+            or not 1 <= port <= 65535
+            or not isinstance(token, str)
+            or len(token) != 64
+        ):
             raise ValueError("invalid Windows session endpoint")
         with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as client:
             client.settimeout(10)
@@ -196,8 +244,9 @@ def main():
     recording = commands.add_parser("record")
     recording.add_argument("file", type=Path)
     recording.add_argument("--duration", type=float, default=180)
-    recording.add_argument("--stop-file", type=Path,
-                           help="Finish cleanly when this initially absent file is created")
+    recording.add_argument(
+        "--stop-file", type=Path, help="Finish cleanly when this initially absent file is created"
+    )
     playback = commands.add_parser("replay")
     playback.add_argument("file", type=Path)
     args = parser.parse_args()
@@ -208,8 +257,9 @@ def main():
     elif args.command == "capture":
         result = capture(args.session, args.name)
     elif args.command == "press":
-        result = request(args.session, {"command": "press", "buttons": args.buttons,
-                                        "hold_ms": args.hold_ms})
+        result = request(
+            args.session, {"command": "press", "buttons": args.buttons, "hold_ms": args.hold_ms}
+        )
     else:
         result = request(args.session, {"command": args.command})
     print(json.dumps(result))

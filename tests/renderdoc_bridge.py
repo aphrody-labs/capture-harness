@@ -4,6 +4,7 @@
 
 Usage: RENDERDOC_INCLUDE=/path/to/sdk/include python3 tools/capture_harness/tests/renderdoc_bridge.py
 """
+
 import os
 import json
 from pathlib import Path
@@ -26,20 +27,57 @@ class BridgeTests(unittest.TestCase):
         cls.helper = cls.directory / "helper.so"
         cls.fake = cls.directory / "fake.so"
         cls.target = cls.directory / "synthetic-target"
-        for source, output in [(root / "rdc_trigger.c", cls.helper),
-                               (root / "tests/fake_renderdoc.c", cls.fake)]:
-            subprocess.run(["cc", "-std=c11", "-Wall", "-Wextra", "-Werror", "-shared", "-fPIC",
-                            "-I", include, str(source), "-o", str(output), "-ldl", "-pthread"], check=True)
-        subprocess.run(["cc", "-std=c11", "-Wall", "-Wextra", "-Werror", "-DSYNTHETIC_TARGET",
-                        "-I", include, str(root / "tests/fake_renderdoc.c"), "-o", str(cls.target)], check=True)
+        for source, output in [
+            (root / "rdc_trigger.c", cls.helper),
+            (root / "tests/fake_renderdoc.c", cls.fake),
+        ]:
+            subprocess.run(
+                [
+                    "cc",
+                    "-std=c11",
+                    "-Wall",
+                    "-Wextra",
+                    "-Werror",
+                    "-shared",
+                    "-fPIC",
+                    "-I",
+                    include,
+                    str(source),
+                    "-o",
+                    str(output),
+                    "-ldl",
+                    "-pthread",
+                ],
+                check=True,
+            )
+        subprocess.run(
+            [
+                "cc",
+                "-std=c11",
+                "-Wall",
+                "-Wextra",
+                "-Werror",
+                "-DSYNTHETIC_TARGET",
+                "-I",
+                include,
+                str(root / "tests/fake_renderdoc.c"),
+                "-o",
+                str(cls.target),
+            ],
+            check=True,
+        )
 
     def run_bridge(self, command, mode="", load_api=True):
         parent, child = socket.socketpair()
         with parent, child:
             parent.settimeout(3)
-            env = dict(os.environ, RUZU_CAPTURE_CONTROL_FD=str(child.fileno()),
-                       RUZU_CAPTURE_PREFIX=str(self.directory / "frame"), FAKE_CAPTURE_MODE=mode,
-                       LD_PRELOAD=f"{self.fake}:{self.helper}" if load_api else str(self.helper))
+            env = dict(
+                os.environ,
+                RUZU_CAPTURE_CONTROL_FD=str(child.fileno()),
+                RUZU_CAPTURE_PREFIX=str(self.directory / "frame"),
+                FAKE_CAPTURE_MODE=mode,
+                LD_PRELOAD=f"{self.fake}:{self.helper}" if load_api else str(self.helper),
+            )
             process = subprocess.Popen(["/bin/sleep", "10"], env=env, pass_fds=(child.fileno(),))
             child.close()
             try:
@@ -75,27 +113,33 @@ class BridgeTests(unittest.TestCase):
             self.skipTest("set CAPTURE_HARNESS_BINARY for the full launch test")
         output = self.directory / "harness-run"
         config = self.directory / "run.toml"
-        config.write_text(f'''[process]
+        config.write_text(f"""[process]
 executable = {json.dumps(str(self.target))}
 rom_path = "/dev/null"
-log_file = {json.dumps(str(output / 'process.log'))}
+log_file = {json.dumps(str(output / "process.log"))}
 [capture]
 output_directory = {json.dumps(str(output))}
 times = []
 [renderdoc]
 library = {json.dumps(str(self.fake))}
 helper = {json.dumps(str(self.helper))}
-capture_prefix = {json.dumps(str(output / 'frame'))}
+capture_prefix = {json.dumps(str(output / "frame"))}
 times = ["0.02"]
 timeout = "0.1"
-''')
-        env = {key: value for key, value in os.environ.items() if key not in
-               {"DISPLAY", "LD_PRELOAD", "RUZU_CAPTURE_CONTROL_FD", "FAKE_CAPTURE_MODE"}}
-        dry_run = subprocess.run([binary, str(config), "--dry-run"], env=env,
-                                 capture_output=True, text=True, timeout=5)
+""")
+        env = {
+            key: value
+            for key, value in os.environ.items()
+            if key not in {"DISPLAY", "LD_PRELOAD", "RUZU_CAPTURE_CONTROL_FD", "FAKE_CAPTURE_MODE"}
+        }
+        dry_run = subprocess.run(
+            [binary, str(config), "--dry-run"], env=env, capture_output=True, text=True, timeout=5
+        )
         self.assertEqual(dry_run.returncode, 0, dry_run.stderr)
         self.assertFalse(output.exists(), "dry-run created output")
-        run = subprocess.run([binary, str(config)], env=env, capture_output=True, text=True, timeout=5)
+        run = subprocess.run(
+            [binary, str(config)], env=env, capture_output=True, text=True, timeout=5
+        )
         self.assertEqual(run.returncode, 0, run.stderr)
         report = json.loads((output / "renderdoc-manifest.json").read_text())
         self.assertIsNone(report["error"])
